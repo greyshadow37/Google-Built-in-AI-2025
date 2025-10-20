@@ -3,3 +3,6 @@ package-lock.json
 node_modules/
 gmm_training/data/
 gmm_training/__pycache__/
+.venv/
+__pycache__/
+src/js/lib/

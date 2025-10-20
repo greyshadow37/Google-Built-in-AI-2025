@@ -1,0 +1,10 @@
+body { font-family: Arial; width: 300px; padding: 10px; }
+h2 { margin: 0 0 10px; }
+#scanButton { width: 100%; padding: 10px; background: #4CAF50; color: white; border: none; cursor: pointer; }
+#scanButton:disabled { background: #ccc; cursor: not-allowed; }
+.status { color: #666; margin: 10px 0; }
+.hidden { display: none; }
+#results { list-style: none; padding: 0; }
+#results li { border-bottom: 1px solid #eee; padding: 8px; }
+.score { color: green; font-weight: bold; }
+.explanation { font-style: italic; margin-top: 5px; }
