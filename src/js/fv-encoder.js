@@ -1,4 +1,4 @@
-// fv-encoder.js - FV utils (backup for background if worker fails)
+// fv-encoder.js - FV utils 
 import * as tf from '@tensorflow/tfjs';
 
 let gmm = null;

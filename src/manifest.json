@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "FV Duplicate Checker",
+  "name": "DupliCheck",
   "version": "1.0",
   "description": "Detects duplicate images in tabs using Fisher Vector.",
   "icons": {
@@ -23,12 +23,11 @@
     "<all_urls>"
   ],
   "background": {
-    "service_worker": "js/background.js",
-    "type": "module"
+    "service_worker": "js/background.js"
   },
   "web_accessible_resources": [
     {
-      "resources": ["assets/models/gmm_params.json", "js/worker.js", "js/lib/tf.min.js"],
+      "resources": ["assets/models/gmm_params.json", "js/worker.js"],
       "matches": ["<all_urls>"]
     }
   ]

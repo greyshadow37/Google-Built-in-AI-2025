@@ -1,4 +1,3 @@
-// tf-helper.js - Basic model load (used in popup if needed)
 let model;
 
 export async function loadModel() {

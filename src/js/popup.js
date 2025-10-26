@@ -1,9 +1,15 @@
-// popup.js - Enhanced with proper async handling and error management
 document.addEventListener('DOMContentLoaded', () => {
   const button = document.getElementById('scanButton');
   const results = document.getElementById('results');
   const status = document.getElementById('status');
-  const noResults = document.getElementById('noResults');
+  const progressSection = document.getElementById('progressSection');
+  const resultsSection = document.getElementById('resultsSection');
+  const progressFill = document.getElementById('progressFill');
+  const progressText = document.getElementById('progressText');
+  const duplicateAlert = document.getElementById('duplicateAlert');
+  const noDuplicatesAlert = document.getElementById('noDuplicatesAlert');
+  const duplicateCount = document.getElementById('duplicateCount');
+  
   console.log('Popup loaded, sending CHECK_MODEL_STATUS');
 
   // Create error div if it doesn't exist
@@ -13,35 +19,48 @@ document.addEventListener('DOMContentLoaded', () => {
     errorDiv.id = 'errorDiv';
     errorDiv.className = 'error hidden';
     errorDiv.style.cssText = 'color: red; padding: 10px; margin: 10px 0; background: #ffe6e6; border: 1px solid #ff9999; border-radius: 4px;';
-    results.parentNode.insertBefore(errorDiv, results);
+    resultsSection.parentNode.insertBefore(errorDiv, resultsSection);
   }
 
   button.onclick = async () => {
     // Reset UI state
-    status.classList.remove('hidden');
-    status.textContent = 'Scanning...';
     button.disabled = true;
-    console.log('Button disabled');
+    progressSection.classList.remove('hidden');
+    resultsSection.classList.add('hidden');
     errorDiv.classList.add('hidden');
-    noResults.classList.add('hidden');
+    duplicateAlert.classList.add('hidden');
+    noDuplicatesAlert.classList.add('hidden');
     results.innerHTML = '';
+    
+    // Reset progress
+    progressFill.style.width = '0%';
+    progressText.textContent = 'Starting scan...';
+    status.textContent = 'Scanning tabs...';
+    
+    console.log('Button disabled, starting scan');
 
     try {
-      // Send scan request
+      // Send scan request with progress handling
       const res = await new Promise((resolve, reject) => {
         chrome.runtime.sendMessage({ type: 'scan' }, (response) => {
           if (chrome.runtime.lastError) {
             reject(new Error(chrome.runtime.lastError.message));
           } else {
+            // Handle progress updates
+            if (response.type === 'progress') {
+              updateProgress(response);
+              return; 
+            }
             resolve(response);
           }
         });
       });
 
-      // Hide status and re-enable button
-      status.classList.add('hidden');
+      // Hide progress and show results
+      progressSection.classList.add('hidden');
+      resultsSection.classList.remove('hidden');
       button.disabled = false;
-      console.log('Button enabled');
+      console.log('Button enabled, showing results');
 
       // Handle scan errors
       if (res.error) {
@@ -53,12 +72,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
       // Handle no matches
       if (!res.matches || res.matches.length === 0) {
-        console.log('Response received: ok');
-        noResults.classList.remove('hidden');
+        console.log('Response received: no duplicates');
+        noDuplicatesAlert.classList.remove('hidden');
         return;
       }
 
-      console.log('Response received: ok');
+      console.log('Response received: duplicates found');
+      // Show duplicate alert
+      duplicateCount.textContent = res.matches.length;
+      duplicateAlert.classList.remove('hidden');
+
       // Load AI helper dynamically with error handling
       let generateExplanation;
       try {
@@ -75,12 +98,11 @@ document.addEventListener('DOMContentLoaded', () => {
       const matchPromises = res.matches.map(async (match, index) => {
         const li = document.createElement('li');
         li.className = 'match-item';
-        li.style.cssText = 'margin: 10px 0; padding: 10px; border: 1px solid #ddd; border-radius: 4px;';
         
         // Initial content
         li.innerHTML = `
           <div class="match-header">
-            <span class="score" style="font-weight: bold; color: #2196F3;">${(match.score * 100).toFixed(1)}%</span>
+            <span class="score">${(match.score * 100).toFixed(1)}%</span>
             <span class="match-label">Similarity</span>
           </div>
           <div class="match-tabs">
@@ -91,7 +113,7 @@ document.addEventListener('DOMContentLoaded', () => {
               <strong>Target:</strong> ${escapeHtml(match.targetTab.title || 'Untitled')}
             </div>
           </div>
-          <div class="explanation" style="margin-top: 8px; font-style: italic; color: #666;">
+          <div class="explanation">
             Loading AI explanation...
           </div>
         `;
@@ -123,7 +145,7 @@ document.addEventListener('DOMContentLoaded', () => {
         return li;
       });
 
-      // Wait for all explanations to complete (optional - for better UX)
+      // Wait for all explanations to complete 
       try {
         await Promise.allSettled(matchPromises);
         console.log('All explanations loaded');
@@ -134,16 +156,24 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch (error) {
       console.error('Scan request failed:', error);
       
-      // Hide status and re-enable button
-      status.classList.add('hidden');
+      // Hide progress and re-enable button
+      progressSection.classList.add('hidden');
+      resultsSection.classList.remove('hidden');
       button.disabled = false;
-      console.log('Button enabled');
+      console.log('Button enabled after error');
       
       // Show error
       errorDiv.textContent = `Request Error: ${error.message}`;
       errorDiv.classList.remove('hidden');
     }
   };
+
+  // Update progress display
+  function updateProgress(progressData) {
+    progressFill.style.width = `${progressData.progress}%`;
+    progressText.textContent = `Processing tab ${progressData.processed}/${progressData.total}: ${progressData.currentTab}`;
+    status.textContent = `Scanning... ${progressData.progress}%`;
+  }
 
   // Utility function to escape HTML
   function escapeHtml(text) {

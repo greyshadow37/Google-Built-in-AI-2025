@@ -1,16 +1,44 @@
 <!DOCTYPE html>
 <html>
 <head>
+  <meta charset="utf-8">
   <title>FV Duplicate Checker</title>
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
   <div class="container">
     <h2>Duplicate Checker</h2>
-    <button id="scanButton" disabled>Scan Tabs</button>
-    <div id="status" class="status hidden">Loading...</div>
-    <ul id="results"></ul>
-    <div id="noResults" class="hidden">No duplicates found.</div>
+    <button id="scanButton">Scan Tabs</button>
+    
+    <!-- Progress section -->
+    <div id="progressSection" class="hidden">
+      <div id="status" class="status">Scanning...</div>
+      <div id="progressBar">
+        <div id="progressFill"></div>
+      </div>
+      <div id="progressText">Processing tabs...</div>
+    </div>
+    
+    <!-- Results section -->
+    <div id="resultsSection" class="hidden">
+      <div id="duplicateAlert" class="duplicate-alert hidden">
+        <div class="alert-icon">⚠️</div>
+        <div class="alert-text">
+          <strong>Duplicates Detected!</strong>
+          <span id="duplicateCount">0</span> duplicate(s) found
+        </div>
+      </div>
+      
+      <div id="noDuplicatesAlert" class="no-duplicates-alert hidden">
+        <div class="alert-icon">✅</div>
+        <div class="alert-text">
+          <strong>No Duplicates Found</strong>
+          All tabs contain unique images
+        </div>
+      </div>
+      
+      <ul id="results"></ul>
+    </div>
   </div>
   <script src="js/popup.js"></script>
 </body>
