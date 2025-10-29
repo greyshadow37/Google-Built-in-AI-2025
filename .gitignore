@@ -6,3 +6,4 @@ gmm_training/__pycache__/
 .venv/
 __pycache__/
 src/js/lib/
+data/

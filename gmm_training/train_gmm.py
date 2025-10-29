@@ -1,175 +1,150 @@
 """
-Offline tool to extract deep features using a pretrained MobileNetV2 backbone
-and train a Gaussian Mixture Model (GMM) for Fisher Vector style encoding.
-
-Usage:
-    python train_gmm.py --dataset_path /path/to/images --output_path ./gmm_params.json --n_components 64
+Train GMM on 20,000 CIFAR-10 images using TensorFlow MobileNetV2
 """
 
-import os
-import sys
-import glob
-import json
 import argparse
-from typing import List
-
+import json
+import os
 import numpy as np
 from PIL import Image
 
-import torch
-import torch.nn as nn
-from torchvision import models, transforms
+import tensorflow as tf
+from tensorflow.keras.applications import MobileNetV2
+from tensorflow.keras.preprocessing.image import img_to_array
+from tensorflow.keras.applications.mobilenet_v2 import preprocess_input
 from sklearn.mixture import GaussianMixture
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Train a GMM on MobileNetV2 feature embeddings.")
-    parser.add_argument("--dataset_path", type=str, required=True,
-                        help="Path to directory containing training images (jpg/png).")
+    parser = argparse.ArgumentParser(description="Train GMM on CIFAR-10 subset")
     parser.add_argument("--output_path", type=str, required=True,
-                        help="Path to output gmm_params.json file.")
+                        help="Path to save gmm_params.json")
     parser.add_argument("--n_components", type=int, default=64,
-                        help="Number of Gaussian components for the GMM (default: 64).")
+                        help="Number of GMM components")
+    parser.add_argument("--n_images", type=int, default=20000,
+                        help="Number of images to use (max 50,000)")
     return parser.parse_args()
 
 
-def load_feature_extractor(device: torch.device) -> nn.Module:
-    print("[INFO] Loading MobileNetV2 backbone (pretrained)...")
-    model = models.mobilenet_v2(weights='DEFAULT')
-    model.classifier = nn.Identity()
-    model.to(device)
-    model.eval()
-    print("[INFO] Model ready. Feature dimension: 1280")
+def load_model():
+    print("[INFO] Loading MobileNetV2 (pretrained on ImageNet)...")
+    # and use global average pooling to get feature vectors
+    model = MobileNetV2(
+        weights='imagenet',
+        include_top=False,
+        pooling='avg',
+        input_shape=(224, 224, 3)
+    )
     return model
 
 
-def build_transforms():
-    return transforms.Compose([
-        transforms.Resize(256),
-        transforms.CenterCrop(224),
-        transforms.ToTensor(),
-        transforms.Normalize(
-            mean=[0.485, 0.456, 0.406],
-            std=[0.229, 0.224, 0.225]
-        )
-    ])
+def preprocess_image(img_np):
+    """Preprocess a single image for MobileNetV2"""
+    # Convert numpy array to PIL Image if needed
+    if isinstance(img_np, np.ndarray):
+        pil_img = Image.fromarray(img_np).convert("RGB")
+    else:
+        pil_img = img_np.convert("RGB")
+    
+    # Resize to 224x224
+    pil_img = pil_img.resize((224, 224), Image.BILINEAR)
+    
+    # Convert to array and preprocess
+    img_array = img_to_array(pil_img)
+    img_array = preprocess_input(img_array)
+    
+    return img_array
 
 
-def collect_image_paths(dataset_path: str) -> List[str]:
-    patterns = ["**/*.jpg", "**/*.jpeg", "**/*.png", "*.jpg", "*.jpeg", "*.png"]
-    image_paths = []
-    for p in patterns:
-        image_paths.extend(glob.glob(os.path.join(dataset_path, p), recursive=True))
-    # Deduplicate while preserving order
-    seen = set()
-    unique_paths = []
-    for path in image_paths:
-        norm = os.path.normpath(path)
-        if norm not in seen:
-            seen.add(norm)
-            unique_paths.append(norm)
-    return unique_paths
+def load_cifar10_subset(n_images=20000):
+    print(f"[INFO] Loading CIFAR-10 (train) – taking {n_images} images...")
+    
+    # Load CIFAR-10 using TensorFlow/Keras
+    (x_train, y_train), (x_test, y_test) = tf.keras.datasets.cifar10.load_data()
+    
+    # Take the first n_images from the training set
+    n_images = min(n_images, len(x_train))
+    images = x_train[:n_images]
+    
+    print(f"[INFO] Loaded {len(images)} CIFAR-10 images")
+    return images
 
 
-def extract_features(model: nn.Module,
-                     device: torch.device,
-                     image_paths: List[str],
-                     tfm: transforms.Compose) -> np.ndarray:
+def extract_features(model, images, batch_size=100):
+    print(f"[INFO] Extracting features from {len(images)} images...")
     features = []
-    total = len(image_paths)
-    if total == 0:
-        raise RuntimeError("No images found. Supported extensions: .jpg, .jpeg, .png")
-
-    print(f"[INFO] Beginning feature extraction for {total} images...")
-    with torch.no_grad():
-        for idx, img_path in enumerate(image_paths, start=1):
-            print(f"[INFO] Processing image {idx} of {total}: {img_path}")
+    
+    # Process images in batches for efficiency
+    for i in range(0, len(images), batch_size):
+        batch_images = images[i:i+batch_size]
+        processed_batch = []
+        
+        for img_np in batch_images:
             try:
-                with Image.open(img_path).convert("RGB") as img:
-                    tensor = tfm(img).unsqueeze(0).to(device)
-                    out = model(tensor)
-                    # Ensure tensor shape (1, 1280)
-                    out_cpu = out.squeeze(0).detach().cpu().numpy()
-                    features.append(out_cpu)
+                processed_img = preprocess_image(img_np)
+                processed_batch.append(processed_img)
             except Exception as e:
-                print(f"[WARN] Failed to process {img_path}: {e}", file=sys.stderr)
+                print(f"  [WARN] Skipping image: {e}")
                 continue
+        
+        if processed_batch:
+            # Stack batch and predict
+            batch_array = np.array(processed_batch)
+            batch_features = model.predict(batch_array, verbose=0)
+            features.append(batch_features)
+        
+        print(f"  [Processed] {min(i+batch_size, len(images))}/{len(images)} images...")
+    
+    # Concatenate all batches
+    all_features = np.vstack(features).astype(np.float32)
+    print(f"[INFO] Extracted features shape: {all_features.shape}")
+    return all_features
 
-    if not features:
-        raise RuntimeError("No features extracted. All image loads may have failed.")
 
-    feature_matrix = np.vstack(features).astype(np.float32)
-    print(f"[INFO] Feature extraction complete. Shape: {feature_matrix.shape}")
-    return feature_matrix
-
-
-def train_gmm(features: np.ndarray, n_components: int) -> GaussianMixture:
-    print(f"[INFO] Training GMM with {n_components} components on {features.shape[0]} samples...")
+def train_gmm(features, n_components):
+    print(f"[INFO] Training GMM ({n_components} components) on {len(features)} samples...")
     gmm = GaussianMixture(
         n_components=n_components,
         covariance_type='diag',
+        random_state=42,
         verbose=2,
-        random_state=42
+        max_iter=100
     )
     gmm.fit(features)
     print("[INFO] GMM training complete.")
     return gmm
 
 
-def export_gmm(gmm: GaussianMixture, output_path: str):
+def save_gmm(gmm, path):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
     params = {
         "weights": gmm.weights_.tolist(),
         "means": gmm.means_.tolist(),
         "covariances": gmm.covariances_.tolist()
     }
-
-    out_dir = os.path.dirname(os.path.abspath(output_path))
-    if out_dir and not os.path.exists(out_dir):
-        os.makedirs(out_dir, exist_ok=True)
-
-    with open(output_path, "w", encoding="utf-8") as f:
+    with open(path, "w") as f:
         json.dump(params, f, indent=4)
-
-    print(f"[INFO] GMM parameters exported to: {output_path}")
+    print(f"[INFO] GMM saved → {path}")
 
 
 def main():
     args = parse_args()
+    
+    # Check for GPU availability
+    gpus = tf.config.list_physical_devices('GPU')
+    if gpus:
+        print(f"[INFO] Using GPU: {len(gpus)} device(s) available")
+        # Enable memory growth to avoid allocating all GPU memory at once
+        for gpu in gpus:
+            tf.config.experimental.set_memory_growth(gpu, True)
+    else:
+        print("[INFO] Using CPU")
 
-    dataset_path = args.dataset_path
-    output_path = args.output_path
-    n_components = args.n_components
-
-    if not os.path.isdir(dataset_path):
-        print(f"[ERROR] Dataset path does not exist or is not a directory: {dataset_path}", file=sys.stderr)
-        sys.exit(1)
-
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"[INFO] Using device: {device}")
-
-    model = load_feature_extractor(device)
-    tfm = build_transforms()
-    image_paths = collect_image_paths(dataset_path)
-
-    try:
-        features = extract_features(model, device, image_paths, tfm)
-    except Exception as e:
-        print(f"[ERROR] Feature extraction failed: {e}", file=sys.stderr)
-        sys.exit(1)
-
-    try:
-        gmm = train_gmm(features, n_components)
-    except Exception as e:
-        print(f"[ERROR] GMM training failed: {e}", file=sys.stderr)
-        sys.exit(1)
-
-    try:
-        export_gmm(gmm, output_path)
-    except Exception as e:
-        print(f"[ERROR] Export failed: {e}", file=sys.stderr)
-        sys.exit(1)
-
-    print("[INFO] All done.")
+    model = load_model()
+    images = load_cifar10_subset(n_images=args.n_images)
+    features = extract_features(model, images)
+    gmm = train_gmm(features, args.n_components)
+    save_gmm(gmm, args.output_path)
 
 
 if __name__ == "__main__":
